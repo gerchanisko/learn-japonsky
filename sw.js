@@ -1,10 +1,12 @@
 /* Japonsky – service worker (offline režim) */
-const CACHE = 'japonsky-v3';
+const CACHE = 'japonsky-v4';
 const ASSETS = [
   './',
   './index.html',
   './css/style.css',
   './js/data.js',
+  './js/audio.js',
+  './audio/silence.mp3',
   './js/app.js',
   './manifest.webmanifest',
   './icons/icon.svg',

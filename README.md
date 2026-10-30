@@ -11,6 +11,7 @@ Appka ve stylu Duolinga na japonštinu pro Čechy. Funguje v prohlížeči a na 
 - **Zkouška** na konci každé jednotky a možnost přeskočit, co už umíš
 - **Série 🔥, XP, srdíčka ❤️, drahokamy 💎, denní úkoly, obchod a úspěchy**
 - **Procvičování:** chytré opakování slabých míst, líný mód 🦥, poslech a psaní
+- **Nahraná výslovnost** všech znaků, slov a vět – hraje na každém zařízení, i offline
 - Tmavý režim, záloha a obnovení postupu
 
 ## Spuštění na GitHub Pages
@@ -41,7 +42,26 @@ python3 -m http.server 8000
 - `css/style.css`: vzhled (světlý i tmavý režim)
 - `js/data.js`: obsah kurzu (znaky, slovíčka, věty, tipy), sem se přidávají nové lekce
 - `js/app.js`: logika appky (cesta, lekce, cvičení, série, úkoly…)
+- `audio/` a `js/audio.js`: nahrávky výslovnosti a jejich mapa (generuje `scripts/gen_audio.py`)
 - `sw.js`: service worker pro offline režim (při změně souborů zvyš verzi `CACHE`)
 - `manifest.webmanifest` a `icons/`: ikonky a nastavení PWA
 
 Postup se ukládá do `localStorage` v prohlížeči. Na jiné zařízení ho přeneseš přes **Profil → Zálohovat postup**.
+
+## Nahrávky výslovnosti
+
+Po přidání nových slov nebo vět je potřeba nahrávky přegenerovat:
+
+```sh
+pip install pyopenjtalk-plus
+node scripts/audio-texts.js > texts.json
+python scripts/gen_audio.py texts.json
+```
+
+Když nějaká nahrávka chybí, appka použije japonský hlas z prohlížeče.
+
+## Poděkování
+
+Výslovnost je syntetizovaná pomocí [Open JTalk](https://open-jtalk.sourceforge.net/) (přes [pyopenjtalk-plus](https://pypi.org/project/pyopenjtalk-plus/)) hlasem
+**HTS Voice „Mei“** © 2009–2013 Nagoya Institute of Technology, Department of Computer Science (MMDAgent Project Team),
+licence [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/).

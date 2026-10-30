@@ -113,7 +113,7 @@
 
   /* ═════════════ Stav a ukládání ═════════════ */
   const KEY = 'japonsky:v1';
-  const APP_VERSION = 'v1.2';
+  const APP_VERSION = 'v1.3';
   const MAX_HEARTS = 5;
   const HEART_MS = 30 * 60 * 1000;
   const PRICE = { hearts: 150, freeze: 100, boost: 80 };
@@ -305,7 +305,7 @@
     if (speechSynthesis.addEventListener) speechSynthesis.addEventListener('voiceschanged', loadVoices);
     else speechSynthesis.onvoiceschanged = loadVoices;
   }
-  const canListen = () => HAS_TTS && S.set.tts && (!VOICES_READY || !!JA_VOICE);
+  const canListen = () => S.set.tts && (typeof AUDIO !== 'undefined' || (HAS_TTS && (!VOICES_READY || !!JA_VOICE)));
 
   // iOS pustí hlas jen z klepnutí – první dotyk proto syntézu „odemkne“,
   // potom už může appka mluvit i sama (např. při novém slovíčku)
@@ -321,7 +321,7 @@
   }
   ['touchend', 'click'].forEach(ev => document.addEventListener(ev, unlockTTS, { capture: true, passive: true }));
 
-  function speak(text, slow) {
+  function speakTTS(text, slow) {
     if (!HAS_TTS || !S.set.tts || !text) return;
     try {
       const ss = speechSynthesis;
@@ -355,16 +355,72 @@
   }
   function voiceSheet() {
     speak('こんにちは。いっしょに にほんご を べんきょう しましょう。');
-    const missing = !HAS_TTS || noJaVoice();
+    const missing = !CLIP_COUNT && (!HAS_TTS || noJaVoice());
     sheet(`<div class="center"><div class="big-emoji">${missing ? '🔇' : '🔊'}</div><h2>${missing ? 'Chybí japonský hlas' : 'Test hlasu'}</h2>
       <p class="muted">${missing ? 'Tvůj prohlížeč neumí japonsky mluvit, proto nic neslyšíš.' : 'Teď bys měl slyšet japonskou větu.'}</p>
       <p class="muted small">${voiceInfo()}</p>
-      <div class="tip small">${missing ? '' : 'Nic neslyšíš? 👇<br>• Zesil hlasitost a vypni ztlumení.<br>• '}${voiceHelp()}</div>
+      <div class="tip small">${missing ? voiceHelp() : `Nic neslyšíš? 👇<br>• Zesil hlasitost a vypni ztlumení${PLATFORM === 'ios' ? ' (přepínač nebo tlačítko Akce na boku iPhonu)' : ''}.${CLIP_COUNT ? '' : '<br>• ' + voiceHelp()}`}</div>
       ${missing ? '' : '<button class="btn blue" data-act="voice-again">Přehrát znovu</button>'}
       <button class="btn ${missing ? '' : 'ghost'}" data-act="close-sheet">${missing ? 'Rozumím' : 'Zavřít'}</button></div>`);
   }
 
+  /* ── nahrávky výslovnosti (Open JTalk, hlas „Mei“) ── */
+  const CLIPS = typeof AUDIO !== 'undefined' ? AUDIO : {};
+  const CLIP_COUNT = Object.keys(CLIPS).length;
+  const hasClip = t => !!CLIPS[t];
+  const blobs = {}, loading = {};
+  let player = null, playId = 0, audioUnlocked = false;
+  const getPlayer = () => player || (player = Object.assign(new Audio(), { preload: 'auto' }));
+
+  // nahrávka se stáhne jako blob (projde service workerem, takže funguje i offline)
+  function loadClip(t) {
+    if (blobs[t]) return Promise.resolve(blobs[t]);
+    if (!loading[t]) {
+      loading[t] = fetch('audio/' + CLIPS[t] + '.mp3')
+        .then(r => { if (!r.ok) throw new Error(r.status); return r.blob(); })
+        .then(b => (blobs[t] = URL.createObjectURL(b)))
+        .catch(e => { delete loading[t]; throw e; });
+    }
+    return loading[t];
+  }
+  const preloadClips = texts => [...new Set(texts)].filter(hasClip).forEach(t => loadClip(t).catch(() => { /* zkusí se znovu */ }));
+
+  // iOS pustí <audio> sám od sebe až poté, co ho jednou spustí klepnutí
+  function unlockAudio() {
+    if (audioUnlocked || !CLIP_COUNT) return;
+    audioUnlocked = true;
+    const a = getPlayer();
+    a.src = 'audio/silence.mp3';
+    const pr = a.play();
+    if (pr && pr.catch) pr.catch(() => { audioUnlocked = false; });
+  }
+
+  function playClip(t, slow) {
+    const a = getPlayer(), id = ++playId;
+    const go = url => {
+      if (id !== playId) return;
+      try { a.pause(); } catch (e) { /* nic */ }
+      a.src = url;
+      a.defaultPlaybackRate = a.playbackRate = slow ? 0.6 : (S.set.slow ? 0.8 : 1);
+      a.preservesPitch = a.webkitPreservesPitch = a.mozPreservesPitch = true;
+      const pr = a.play();
+      if (pr && pr.catch) pr.catch(() => { /* zablokované přehrání */ });
+    };
+    if (blobs[t]) go(blobs[t]);
+    else loadClip(t).then(go, () => { if (id === playId) speakTTS(t, slow); });
+  }
+
+  function speak(text, slow) {
+    if (!S.set.tts || !text) return;
+    if (navigator.audioSession && navigator.audioSession.type !== 'playback') {
+      try { navigator.audioSession.type = 'playback'; } catch (e) { /* nepodporováno */ }
+    }
+    if (hasClip(text)) playClip(text, slow);
+    else speakTTS(text, slow);
+  }
+
   function voiceInfo() {
+    if (CLIP_COUNT) return 'Výslovnost je nahraná přímo v appce, takže hraje na každém zařízení 🎧';
     if (!HAS_TTS) return 'Tenhle prohlížeč neumí předčítat 😕';
     loadVoices();
     const ja = speechSynthesis.getVoices().filter(v => /^ja/i.test(v.lang.replace('_', '-')));
@@ -730,7 +786,7 @@
       ${card('lazy', '🦥', 'Líný mód', 'Jen 5 lehkých otázek. Na gauči, bez stresu.', 'lazy')}
       ${canListen() ? card('listen', '🎧', 'Poslech', 'Trénuj ucho – jen poslechová cvičení') : ''}
       ${card('type', '⌨️', 'Psaní romaji', 'Přepisuj japonštinu do latinky')}
-      ${!canListen() && HAS_TTS && VOICES_READY ? '<p class="note">🔇 Na tomhle zařízení chybí japonský hlas, takže poslech je vypnutý.</p>' : ''}
+      ${!S.set.tts ? '<p class="note">🔇 Japonský hlas máš vypnutý v Profilu, takže poslech je skrytý.</p>' : ''}
     </div>`;
   }
 
@@ -824,7 +880,7 @@
         <div class="set-row"><span><b>Denní cíl</b><small>Kolik XP chceš denně nasbírat</small></span></div>
         <div class="seg goal-seg">${[[10, '🐢 10'], [20, '🙂 20'], [30, '💪 30'], [50, '🔥 50']].map(([v, l]) => `<button class="${S.goal === v ? 'on' : ''}" data-act="goal" data-v="${v}">${l}</button>`).join('')}</div>
         ${setRow('sfx', 'Zvukové efekty')}
-        ${setRow('tts', 'Japonský hlas', HAS_TTS ? (VOICES_READY && !JA_VOICE ? 'Na tomhle zařízení chybí japonský hlas' : 'Předčítání slov a vět') : 'Prohlížeč nepodporuje předčítání')}
+        ${setRow('tts', 'Japonský hlas', 'Výslovnost slov a vět')}
         <button class="set-row link" data-act="voice-test"><span><b>🔊 Vyzkoušet hlas</b><small>Neslyšíš slovíčka? Klepni sem</small></span>›</button>
         ${setRow('slow', 'Pomalejší hlas', 'Hodí se na začátku')}
         ${setRow('romaji', 'Zobrazovat romaji', 'Nápověda latinkou pod japonštinou')}
@@ -837,7 +893,9 @@
         <button class="set-row link" data-act="import"><span><b>📥 Obnovit ze zálohy</b><small>Vlož kód zálohy</small></span>›</button>
         <button class="set-row link danger" data-act="reset"><span><b>🗑️ Smazat postup</b><small>Začneš úplně od nuly</small></span>›</button>
       </div>
-      <p class="about">Japonsky ${APP_VERSION} · vyrobeno s ❤️ pro Čechy, co chtějí do Japonska<br>がんばって！ (Ganbatte – drž se!)</p>
+      <p class="about">Japonsky ${APP_VERSION} · vyrobeno s ❤️ pro Čechy, co chtějí do Japonska<br>がんばって！ (Ganbatte – drž se!)<br><br>
+        Výslovnost: Open JTalk, HTS voice „Mei“ © 2009–2013 Nagoya Institute of Technology,
+        <a href="https://creativecommons.org/licenses/by/3.0/" target="_blank" rel="noopener">CC BY 3.0</a></p>
     </div>`;
   }
 
@@ -942,6 +1000,8 @@
     if (!cfg.steps || !cfg.steps.length) return toast('Tady zatím není co procvičit 🤷');
     closePop(); closeSheet(true);
     ac();
+    unlockAudio();
+    preloadClips(cfg.steps.flatMap(clipTexts));
     L = Object.assign({
       queue: cfg.steps.slice(), total: cfg.steps.length, done: 0, mistakes: 0, combo: 0, maxCombo: 0,
       answered: 0, right: 0, t0: Date.now(), usesHearts, listenDone: 0, lives: cfg.kind === 'jump' ? 3 : null,
@@ -959,6 +1019,17 @@
     ov.classList.add('open');
     document.body.classList.add('in-lesson');
     nextStep();
+  }
+
+  function clipTexts(ex) {
+    if (!ex) return [];
+    const t = [];
+    if (ex.item) t.push(ex.item.say);
+    if (ex.opts) ex.opts.forEach(o => t.push(o.say));
+    if (ex.items) ex.items.forEach(i => t.push(i.say));
+    if (ex.item && ex.item.tokens) ex.item.tokens.forEach(k => t.push(sayToken(k)));
+    if (ex.tiles && ex.target === 'jp') ex.tiles.forEach(k => t.push(sayToken(k.txt)));
+    return t;
   }
 
   function updateLessonTop() {
@@ -1522,7 +1593,7 @@
     },
     'jump-go'(el) { startJump(+el.dataset.u); },
     say(el) {
-      if (S.set.tts && (!HAS_TTS || noJaVoice()) && !UI.voiceWarned) { UI.voiceWarned = true; return voiceSheet(); }
+      if (S.set.tts && !hasClip(el.dataset.t) && (!HAS_TTS || noJaVoice()) && !UI.voiceWarned) { UI.voiceWarned = true; return voiceSheet(); }
       speak(el.dataset.t, el.classList.contains('slow'));
     },
     chars(el) { UI.chars = el.dataset.v; render(); },

@@ -324,6 +324,7 @@ p { margin: 0; }
 .switch:checked { background: var(--green); }
 .switch:checked::after { transform: translateX(20px); }
 .about { text-align: center; color: var(--muted); font-size: 13px; padding: 10px 0 20px; }
+.about a { color: var(--blue); }
 
 /* ── sheets ── */
 .sheet-wrap { position: fixed; inset: 0; z-index: 50; display: flex; align-items: flex-end; justify-content: center; }
