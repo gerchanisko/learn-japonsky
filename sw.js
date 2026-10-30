@@ -1,5 +1,5 @@
 /* Japonsky – service worker (offline režim) */
-const CACHE = 'japonsky-v2';
+const CACHE = 'japonsky-v3';
 const ASSETS = [
   './',
   './index.html',

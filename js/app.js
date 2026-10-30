@@ -113,7 +113,7 @@
 
   /* ═════════════ Stav a ukládání ═════════════ */
   const KEY = 'japonsky:v1';
-  const APP_VERSION = 'v1.1';
+  const APP_VERSION = 'v1.2';
   const MAX_HEARTS = 5;
   const HEART_MS = 30 * 60 * 1000;
   const PRICE = { hearts: 150, freeze: 100, boost: 80 };
@@ -339,6 +339,29 @@
       lastUtter = u; // drží referenci, jinak ji prohlížeč může zahodit dřív, než dořekne
       ss.speak(u);
     } catch (e) { /* bez hlasu */ }
+  }
+
+  const PLATFORM = isIOS ? 'ios' : /android/i.test(navigator.userAgent) ? 'android' : /Win/.test(navigator.platform) ? 'win' : /Mac/.test(navigator.platform) ? 'mac' : 'other';
+  const noJaVoice = () => HAS_TTS && VOICES_READY && !JA_VOICE;
+  function voiceHelp() {
+    const firefox = /firefox/i.test(navigator.userAgent);
+    return {
+      ios: 'Japonský hlas stáhneš v <b>Nastavení → Zpřístupnění → Předčítaný obsah → Hlasy → Japonština</b>.',
+      android: 'Otevři <b>Nastavení → Usnadnění → Převod textu na řeč</b> a v nastavení Google doinstaluj <b>japonštinu</b>.',
+      win: `${firefox ? '<b>Nejrychlejší:</b> otevři appku v <b>Edge</b> nebo <b>Chrome</b> – ty mají japonský hlas v sobě.<br>' : ''}Nebo ve Windows: <b>Nastavení → Čas a jazyk → Řeč → Přidat hlasy → Japonština</b> a pak restartuj prohlížeč.`,
+      mac: 'Otevři <b>Nastavení systému → Zpřístupnění → Mluvený obsah → Systémový hlas → Spravovat hlasy</b> a stáhni <b>japonštinu</b>.',
+      other: 'Zkus appku otevřít v <b>Chrome</b> nebo <b>Edge</b> – ty mají japonský hlas v sobě.',
+    }[PLATFORM];
+  }
+  function voiceSheet() {
+    speak('こんにちは。いっしょに にほんご を べんきょう しましょう。');
+    const missing = !HAS_TTS || noJaVoice();
+    sheet(`<div class="center"><div class="big-emoji">${missing ? '🔇' : '🔊'}</div><h2>${missing ? 'Chybí japonský hlas' : 'Test hlasu'}</h2>
+      <p class="muted">${missing ? 'Tvůj prohlížeč neumí japonsky mluvit, proto nic neslyšíš.' : 'Teď bys měl slyšet japonskou větu.'}</p>
+      <p class="muted small">${voiceInfo()}</p>
+      <div class="tip small">${missing ? '' : 'Nic neslyšíš? 👇<br>• Zesil hlasitost a vypni ztlumení.<br>• '}${voiceHelp()}</div>
+      ${missing ? '' : '<button class="btn blue" data-act="voice-again">Přehrát znovu</button>'}
+      <button class="btn ${missing ? '' : 'ghost'}" data-act="close-sheet">${missing ? 'Rozumím' : 'Zavřít'}</button></div>`);
   }
 
   function voiceInfo() {
@@ -1498,7 +1521,10 @@
         <button class="btn ghost" data-act="close-sheet">Radši ne</button></div>`);
     },
     'jump-go'(el) { startJump(+el.dataset.u); },
-    say(el) { speak(el.dataset.t, el.classList.contains('slow')); },
+    say(el) {
+      if (S.set.tts && (!HAS_TTS || noJaVoice()) && !UI.voiceWarned) { UI.voiceWarned = true; return voiceSheet(); }
+      speak(el.dataset.t, el.classList.contains('slow'));
+    },
     chars(el) { UI.chars = el.dataset.v; render(); },
     'practice-kana'(el) {
       const items = learnedItems().filter(i => i.type === 'kana' && i.script === el.dataset.v);
@@ -1558,15 +1584,7 @@
       sheet(`<div class="center">${mochi('sad', 100)}<h2>Smazat všechno?</h2><p class="muted">Přijdeš o sérii, XP i všechen postup. Tohle nejde vrátit.</p>
         <button class="btn red" data-act="reset-go">Ano, smazat</button><button class="btn ghost" data-act="close-sheet">Ne, nechci</button></div>`);
     },
-    'voice-test'() {
-      speak('こんにちは。いっしょに にほんご を べんきょう しましょう。');
-      sheet(`<div class="center"><div class="big-emoji">🔊</div><h2>Test hlasu</h2>
-        <p class="muted">Teď bys měl slyšet japonskou větu.</p>
-        <p class="muted small">${voiceInfo()}</p>
-        <div class="tip small">Nic neslyšíš? 👇<br>1. Zesil hlasitost tlačítky na boku.<br>2. Vypni ztlumení (přepínač nebo tlačítko Akce na boku iPhonu).<br>3. Japonský hlas stáhneš v <b>Nastavení → Zpřístupnění → Předčítaný obsah → Hlasy → Japonština</b>.</div>
-        <button class="btn blue" data-act="voice-again">Přehrát znovu</button>
-        <button class="btn ghost" data-act="close-sheet">Zavřít</button></div>`);
-    },
+    'voice-test'() { voiceSheet(); },
     'voice-again'() { speak('こんにちは。いっしょに にほんご を べんきょう しましょう。'); },
     'reset-go'() { try { localStorage.removeItem(KEY); } catch (e) { /* nic */ } location.reload(); },
 
