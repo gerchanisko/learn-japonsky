@@ -1,5 +1,5 @@
 /* Japonsky – service worker (offline režim) */
-const CACHE = 'japonsky-v1';
+const CACHE = 'japonsky-v2';
 const ASSETS = [
   './',
   './index.html',
@@ -14,7 +14,11 @@ const ASSETS = [
 ];
 
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));
+  e.waitUntil(
+    caches.open(CACHE)
+      .then(c => c.addAll(ASSETS.map(u => new Request(u, { cache: 'reload' }))))
+      .then(() => self.skipWaiting())
+  );
 });
 
 self.addEventListener('activate', e => {

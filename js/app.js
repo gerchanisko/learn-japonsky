@@ -113,6 +113,7 @@
 
   /* ═════════════ Stav a ukládání ═════════════ */
   const KEY = 'japonsky:v1';
+  const APP_VERSION = 'v1.1';
   const MAX_HEARTS = 5;
   const HEART_MS = 30 * 60 * 1000;
   const PRICE = { hearts: 150, freeze: 100, boost: 80 };
@@ -288,32 +289,64 @@
   const sfx = k => { if (S.set.sfx) try { SFX[k](); } catch (e) { /* bez zvuku */ } };
 
   /* ── japonský hlas ── */
+  const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
   const HAS_TTS = 'speechSynthesis' in window;
-  let JA_VOICE = null, VOICES_READY = false;
+  let JA_VOICE = null, VOICES_READY = false, lastUtter = null, ttsUnlocked = false;
   function loadVoices() {
     if (!HAS_TTS) return;
     const vs = speechSynthesis.getVoices();
     if (!vs.length) return;
     VOICES_READY = true;
-    const ja = vs.filter(v => /^ja/i.test(v.lang));
-    JA_VOICE = ja.find(v => /Kyoko|O-ren|Google/i.test(v.name)) || ja[0] || null;
+    const ja = vs.filter(v => /^ja/i.test(v.lang.replace('_', '-')));
+    JA_VOICE = ja.find(v => v.localService && /Kyoko|O-ren|Hattori/i.test(v.name)) || ja.find(v => v.localService) || ja[0] || null;
   }
-  if (HAS_TTS) { loadVoices(); speechSynthesis.onvoiceschanged = loadVoices; }
+  if (HAS_TTS) {
+    loadVoices();
+    if (speechSynthesis.addEventListener) speechSynthesis.addEventListener('voiceschanged', loadVoices);
+    else speechSynthesis.onvoiceschanged = loadVoices;
+  }
   const canListen = () => HAS_TTS && S.set.tts && (!VOICES_READY || !!JA_VOICE);
+
+  // iOS pustí hlas jen z klepnutí – první dotyk proto syntézu „odemkne“,
+  // potom už může appka mluvit i sama (např. při novém slovíčku)
+  function unlockTTS() {
+    if (ttsUnlocked || !HAS_TTS) return;
+    ttsUnlocked = true;
+    try {
+      const u = new SpeechSynthesisUtterance(' ');
+      u.volume = 0;
+      u.lang = 'ja-JP';
+      speechSynthesis.speak(u);
+    } catch (e) { /* bez hlasu */ }
+  }
+  ['touchend', 'click'].forEach(ev => document.addEventListener(ev, unlockTTS, { capture: true, passive: true }));
 
   function speak(text, slow) {
     if (!HAS_TTS || !S.set.tts || !text) return;
-    const go = () => {
+    try {
+      const ss = speechSynthesis;
+      // vše synchronně, aby iOS bral přehrání jako reakci na klepnutí
+      if (ss.speaking || ss.pending) ss.cancel();
+      if (ss.paused) ss.resume();
+      // ať jsou slovíčka slyšet i s přepínačem ztlumení na iPhonu
+      if (navigator.audioSession && navigator.audioSession.type !== 'playback') navigator.audioSession.type = 'playback';
       const u = new SpeechSynthesisUtterance(text);
       u.lang = 'ja-JP';
-      if (JA_VOICE) u.voice = JA_VOICE;
+      // na iOS stačí jazyk (vybere výchozí japonský hlas); vynucený hlas může být nestažený a mlčí
+      if (JA_VOICE && !isIOS) u.voice = JA_VOICE;
       u.rate = slow ? 0.5 : (S.set.slow ? 0.7 : 0.9);
-      speechSynthesis.speak(u);
-    };
-    try {
-      if (speechSynthesis.speaking || speechSynthesis.pending) { speechSynthesis.cancel(); setTimeout(go, 60); }
-      else go();
+      u.volume = 1;
+      lastUtter = u; // drží referenci, jinak ji prohlížeč může zahodit dřív, než dořekne
+      ss.speak(u);
     } catch (e) { /* bez hlasu */ }
+  }
+
+  function voiceInfo() {
+    if (!HAS_TTS) return 'Tenhle prohlížeč neumí předčítat 😕';
+    loadVoices();
+    const ja = speechSynthesis.getVoices().filter(v => /^ja/i.test(v.lang.replace('_', '-')));
+    if (ja.length) return `Japonský hlas: <b>${esc(uniqBy(ja, v => v.name).map(v => v.name).slice(0, 4).join(', '))}</b>`;
+    return VOICES_READY ? 'V zařízení jsem nenašel japonský hlas 😕' : 'Seznam hlasů je prázdný, zkouším výchozí hlas.';
   }
   // samostatná částice se má číst jako částice
   const sayToken = t => ({ 'は': 'わ', 'へ': 'え', 'を': 'お' }[t] || t);
@@ -769,6 +802,7 @@
         <div class="seg goal-seg">${[[10, '🐢 10'], [20, '🙂 20'], [30, '💪 30'], [50, '🔥 50']].map(([v, l]) => `<button class="${S.goal === v ? 'on' : ''}" data-act="goal" data-v="${v}">${l}</button>`).join('')}</div>
         ${setRow('sfx', 'Zvukové efekty')}
         ${setRow('tts', 'Japonský hlas', HAS_TTS ? (VOICES_READY && !JA_VOICE ? 'Na tomhle zařízení chybí japonský hlas' : 'Předčítání slov a vět') : 'Prohlížeč nepodporuje předčítání')}
+        <button class="set-row link" data-act="voice-test"><span><b>🔊 Vyzkoušet hlas</b><small>Neslyšíš slovíčka? Klepni sem</small></span>›</button>
         ${setRow('slow', 'Pomalejší hlas', 'Hodí se na začátku')}
         ${setRow('romaji', 'Zobrazovat romaji', 'Nápověda latinkou pod japonštinou')}
         ${setRow('cz', 'Česká výslovnost', 'Např. shi → ši, chi → či')}
@@ -780,7 +814,7 @@
         <button class="set-row link" data-act="import"><span><b>📥 Obnovit ze zálohy</b><small>Vlož kód zálohy</small></span>›</button>
         <button class="set-row link danger" data-act="reset"><span><b>🗑️ Smazat postup</b><small>Začneš úplně od nuly</small></span>›</button>
       </div>
-      <p class="about">Japonsky · vyrobeno s ❤️ pro Čechy, co chtějí do Japonska<br>がんばって！ (Ganbatte – drž se!)</p>
+      <p class="about">Japonsky ${APP_VERSION} · vyrobeno s ❤️ pro Čechy, co chtějí do Japonska<br>がんばって！ (Ganbatte – drž se!)</p>
     </div>`;
   }
 
@@ -1266,6 +1300,7 @@
     ov.classList.remove('open');
     ov.innerHTML = '';
     document.body.classList.remove('in-lesson');
+    if (UI.reloadAfterLesson) return location.reload();
     render();
   }
 
@@ -1435,7 +1470,6 @@
   }
 
   /* ── tip na instalaci (iOS) ── */
-  const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
   const standalone = navigator.standalone || matchMedia('(display-mode: standalone)').matches;
   function maybeInstallHint() {
     if (!isIOS || standalone || S.installHint) return;
@@ -1524,6 +1558,16 @@
       sheet(`<div class="center">${mochi('sad', 100)}<h2>Smazat všechno?</h2><p class="muted">Přijdeš o sérii, XP i všechen postup. Tohle nejde vrátit.</p>
         <button class="btn red" data-act="reset-go">Ano, smazat</button><button class="btn ghost" data-act="close-sheet">Ne, nechci</button></div>`);
     },
+    'voice-test'() {
+      speak('こんにちは。いっしょに にほんご を べんきょう しましょう。');
+      sheet(`<div class="center"><div class="big-emoji">🔊</div><h2>Test hlasu</h2>
+        <p class="muted">Teď bys měl slyšet japonskou větu.</p>
+        <p class="muted small">${voiceInfo()}</p>
+        <div class="tip small">Nic neslyšíš? 👇<br>1. Zesil hlasitost tlačítky na boku.<br>2. Vypni ztlumení (přepínač nebo tlačítko Akce na boku iPhonu).<br>3. Japonský hlas stáhneš v <b>Nastavení → Zpřístupnění → Předčítaný obsah → Hlasy → Japonština</b>.</div>
+        <button class="btn blue" data-act="voice-again">Přehrát znovu</button>
+        <button class="btn ghost" data-act="close-sheet">Zavřít</button></div>`);
+    },
+    'voice-again'() { speak('こんにちは。いっしょに にほんご を べんきょう しましょう。'); },
     'reset-go'() { try { localStorage.removeItem(KEY); } catch (e) { /* nic */ } location.reload(); },
 
     // lekce
@@ -1584,7 +1628,13 @@
   if (UI.frozeMsg) { toast(`🧊 Zmrazení zachránilo tvoji sérii!`); UI.frozeMsg = 0; }
 
   if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
-    navigator.serviceWorker.register('sw.js').catch(() => { /* offline režim nebude */ });
+    const hadController = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!hadController || UI.reloading) return;
+      UI.reloading = true;
+      if (L) UI.reloadAfterLesson = true; else location.reload();
+    });
+    navigator.serviceWorker.register('sw.js').then(r => r.update()).catch(() => { /* offline režim nebude */ });
   }
 
   // pro testy v konzoli
